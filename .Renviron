@@ -1,0 +1,4 @@
+RENV_PATHS_ROOT=/well/immune-rep/users/yfg436/renv_root
+RENV_PATHS_SANDBOX=/well/immune-rep/users/yfg436/renv_root/sandbox
+RENV_CONFIG_SANDBOX_ENABLED=TRUE
+RENV_ACTIVATE_PROJECT=TRUE
