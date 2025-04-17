@@ -29,7 +29,7 @@ analysis = "VDJ_clonality"
 input_directory_groups = "data/sample_data/pdac/"
 #input_directory_groups  = "~/Google_Drive/Projects/GITHUB/PDAC150K/DATA/PROPORTIONS/"
 #output_directory = "~/Google_Drive/Projects/GITHUB/PDAC150K/DATA/OUTPUTS/"
-output_directory = create_dir("results/screptransition")
+#output_directory = create_dir("results/screptransition")
 groups_PCA = readRDS(file = concat(c(input_directory_groups, "PCA_cell_counts_blood_PCA_groups_PDAC150Ka.RDS")))
 
 ##### get meta data (cell type) with VDJ information
@@ -135,6 +135,10 @@ Get_TCR_information<-function(input_directory_groups){
 
 VDJ_list_BCR = Get_BCR_information(input_directory_groups)
 VDJ_list_TCR = Get_TCR_information(input_directory_groups)
+
+# Added by Liezel
+saveRDS(VDJ_list_BCR, file.path(getwd(), "results", "screptransition", "VDJ_list_BCR.rds"))
+saveRDS(VDJ_list_TCR, file.path(getwd(), "results", "screptransition", "VDJ_list_TCR.rds"))
 
 ## identify CD4 and CD8 T cell subtypes: the user may need to edit this depending on annotations
 VDJ_list = VDJ_list_TCR
