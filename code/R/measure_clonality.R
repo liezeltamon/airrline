@@ -75,14 +75,19 @@ measure_clonality <- function(
     data_wrangled[ ,"grouping_id", drop = FALSE]
   )
   
-  # Add seed value per grouping
+  # Add additional information per grouping
   set.seed(seed)
   seed_values <- sample(1:1000, size = length(grouped_data_lst), replace = FALSE)
+  subset_levels <- "value"
+  if (!is.null(subset_key)) {
+    subset_levels <- sort(unique(data[[subset_key]]))
+  }
   for (i in 1:length(grouped_data_lst)) {
     grouped_data_lst[[i]] <- list(
       df = grouped_data_lst[[i]],
       seed = seed_values[i],
-      name = names(grouped_data_lst)[[i]]
+      name = names(grouped_data_lst)[[i]],
+      subset_levels = subset_levels
     )
   }
   
@@ -119,12 +124,14 @@ measure_clonality <- function(
         input <- grp_data$df[sample_inds, "clone_id"]
         subset_values <- grp_data$df[sample_inds, subset_key]
         # subset_values ignored for other functions except .inter_subset()
-        subsampled_lst[[b]] <- .calculate_measure(input, subset_values = subset_values)
+        subsampled_lst[[b]] <- .calculate_measure(input, subset_values = subset_values, subset_levels = grp_data$subset_levels)
         
       } # for loop
       
     } else {
-      subsampled_lst <- NA
+      subsampled_lst <- list(as.data.frame(
+        matrix(NA, nrow = 1, ncol = length(grp_data$subset_levels), dimnames = list(NULL, grp_data$subset_levels))
+      ))
     }
     
     message(grp_data$name, " done!")
@@ -206,6 +213,7 @@ measure_clonality <- function(
 .inter_subset <- function(
     x,                    # df with clone_key and subset_key columns
     subset_values,        # subset values of cells in x in same order
+    subset_levels = NULL, # All possible subset levels
     method_inter = c("sum_n", "average_proportions"),
     expanded_min_size = 3 # min size of clone to be considered expanded
 ) {
@@ -234,7 +242,10 @@ measure_clonality <- function(
                               "average_proportions" = .average_proportions,
                               stop(".inter_subset(): Invalid method provided"))
   
-  tbl <- table(x, subset_values)
+  # Converted to factor so all levels are used
+  x_fct <- factor(x)
+  subset_values_fct <- factor(subset_values, levels = subset_levels)
+  tbl <- table(x_fct, subset_values_fct)
   expanded_clones <- which(rowSums(tbl) >= expanded_min_size)
   
   if (length(expanded_clones) >= 1) {
@@ -245,17 +256,18 @@ measure_clonality <- function(
              dimnames = list("", colnames(tbl)))
     )
   }
+  
   return(output)
+  
   
 }
 
 # Functions to wrangle / summarise to get OUTPUT:
 
 # Convert SUBSAMPLED to melted data.frame ready for plotting
+# grouping_id with NA as value as those repertoire with size < subsample_size
 transform_to_df <- function(x, method) {
   
-  # NAs as those with subsampled_lst <- NA
-  x <- x[!is.na(x)]
   grp_df_lst <- sapply(x, USE.NAMES = TRUE, simplify = FALSE, function(df_lst) {
     bind_rows(df_lst)
   })
