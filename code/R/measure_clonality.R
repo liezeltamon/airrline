@@ -8,6 +8,7 @@ library(tidyverse)
 library(foreach)
 library(doParallel)
 library(assertthat)
+library(DescTools)
 
 #source("utils/env.R")
 #library(scRepertoire) # For some diversity measures
@@ -65,7 +66,9 @@ measure_clonality <- function(
     .calculate_measure <- switch(method,
                                  "intra_subset" = .intra_subset,
                                  "inter_subset" = .inter_subset,
+                                 "gini"         = .gini,
                                  "clone_size"   = .clone_size,
+                                 "grouping_size"  = .grouping_size,
                                  stop("measure_clonality(): Invalid method provided"))
   }
 
@@ -188,6 +191,22 @@ measure_clonality <- function(
 }
 
 # Functions to assign to .calculate_measure() applying to vector of clone ids
+
+.gini <- function(x, ...) {
+  stop(".gini(): Review")
+  # Convert to proportion of members in clone in case no subsampling is done
+  x_tmp <- as.numeric(table(x))
+  prop <- x_tmp / sum(x_tmp)
+  output <- DescTools::Gini(prop)
+  return(output)
+}
+
+.grouping_size <- function(
+  x,
+  ...
+) {
+  return(length(x))
+}
 
 .clone_size <- function(
     x,
