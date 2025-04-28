@@ -190,14 +190,14 @@ measure_clonality <- function(
   
 }
 
-# Functions to assign to .calculate_measure() applying to vector of clone ids
+# Functions to assign to .calculate_measure() applying to vector of clone ids (x)
 
-.gini <- function(x, ...) {
-  stop(".gini(): Review")
-  # Convert to proportion of members in clone in case no subsampling is done
-  x_tmp <- as.numeric(table(x))
-  prop <- x_tmp / sum(x_tmp)
-  output <- DescTools::Gini(prop)
+.gini <- function(
+    x,
+    ...
+) {
+  x_tbl <- as.numeric(table(x))
+  output <- DescTools::Gini(x_tbl)
   return(output)
 }
 
