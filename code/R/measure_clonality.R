@@ -210,16 +210,20 @@ measure_clonality <- function(
 
 .clone_size <- function(
     x,
-    scale = NULL,
+    scale = "auto",
     ...
 ) {
   tbl <- table(x)
   tbl_numeric <- as.numeric(tbl)
   names(tbl_numeric) <- names(tbl)
-  if (!is.null(scale)) {
+  if (scale == "auto") {
+    output <- tbl_numeric / length(x)
+  } else if (scale == "raw") {
+    output <- tbl_numeric
+  } else if (is.numeric(scale)) {
     output <- tbl_numeric / scale
   } else {
-    output <- tbl_numeric / length(x)
+    stop(".clone_size(): Invalid scale argument. Indicate 'auto', 'raw' or a numeric value.")
   }
   return(as.data.frame(enframe(output, name = "clone_id", value = "value")))
 }
@@ -227,15 +231,19 @@ measure_clonality <- function(
 .intra_subset <- function(
     x,                     # a subsample of clone ids
     expanded_min_size = 2, # clone size
-    scale = NULL,          # typically scale by subsample size
+    scale = "auto",
     ...                    # to ignore .inter_subset() arguments passed to sure()
 ) { 
   tbl <- table(x)
   n_in_expanded <- sum(tbl[tbl >= expanded_min_size])
-  if (!is.null(scale)) {
+  if (scale == "auto") {
+    output <- n_in_expanded / length(x)
+  } else if (scale == "raw") {
+    output <- n_in_expanded
+  } else if (is.numeric(scale)) {
     output <- n_in_expanded / scale
   } else {
-    output <- n_in_expanded / length(x)
+    stop(".intra_subset(): Invalid scale argument. Indicate 'auto', 'raw' or a numeric value.")
   }
   return(output)
 }
