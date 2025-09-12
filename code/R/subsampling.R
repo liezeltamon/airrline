@@ -4,11 +4,10 @@
 # Other utility functions to help choose subsample size, classify clones based on size
 # Other clonality measures needing subsampling can easily be integrated as additional methods
 
-library(tidyverse)
+library(assertthat)
 library(foreach)
 library(doParallel)
-library(assertthat)
-library(DescTools)
+library(tidyverse)
 
 #source("utils/env.R")
 #library(scRepertoire) # For some diversity measures
@@ -23,9 +22,9 @@ get_grouping_sizes <- function(
 ) {
   
   p_df <- data %>% 
-    dplyr::group_by(across(all_of(grouping_keys))) %>% 
+    group_by(across(all_of(grouping_keys))) %>% 
     count() %>% 
-    dplyr::arrange(n) %>% 
+    arrange(n) %>% 
     { if (drop_na) drop_na(.) else . }
   
   if (export_table) {
@@ -59,21 +58,24 @@ measure_clonality <- function(
 ) {
 
   # Assign right function to calculate_measure() based on metric argument, use switch?
+  # See dedicated scripts for functions to assign to .calculate_measure() applying to vector of clone ids (x)
   if (!is.null(method_fun)) {
     .calculate_measure <- method_fun
     method = NULL
   } else {
-    .calculate_measure <- switch(method,
-                                 "intra_subset" = .intra_subset,
-                                 "inter_subset" = .inter_subset,
-                                 "gini"         = .gini,
-                                 "clone_size"   = .clone_size,
-                                 "grouping_size"  = .grouping_size,
-                                 stop("measure_clonality(): Invalid method provided"))
+    .calculate_measure <- switch(
+      method,
+      "clone_size"   = .clone_size,
+      "grouping_size"  = .grouping_size,
+      "intra_subset" = .intra_subset,
+      "inter_subset" = .inter_subset,
+      # Add diversity metrics here
+      stop("measure_clonality(): Invalid method provided")
+    )
   }
 
   data_wrangled <- data %>%
-    tidyr::unite("grouping_id", grouping_keys, remove = FALSE, sep = sep) %>% 
+    unite("grouping_id", grouping_keys, remove = FALSE, sep = sep) %>% 
     select(all_of(c("grouping_id", clone_key, subset_key))) %>% 
     rename(clone_id = !!sym(clone_key)) %>% 
     { if (drop_na) drop_na(.) else . }
@@ -86,7 +88,7 @@ measure_clonality <- function(
   
   # Get required information across groupings
   set.seed(seed)
-  seed_values <- sample(1:1000, size = length(grouped_data_lst), replace = FALSE)
+  seed_values <- sample(1:n_subsamples, size = length(grouped_data_lst), replace = FALSE)
   
   if (!is.null(subsample_size)) {
     subsample_sizes <- rep(subsample_size, times = length(grouped_data_lst))
@@ -187,116 +189,6 @@ measure_clonality <- function(
   }
   
   return(OUTPUT)
-  
-}
-
-# Functions to assign to .calculate_measure() applying to vector of clone ids (x)
-
-.gini <- function(
-    x,
-    ...
-) {
-  x_tbl <- as.numeric(table(x))
-  output <- DescTools::Gini(x_tbl)
-  return(output)
-}
-
-.grouping_size <- function(
-  x,
-  ...
-) {
-  return(length(x))
-}
-
-.clone_size <- function(
-    x,
-    scale = "auto",
-    ...
-) {
-  tbl <- table(x)
-  tbl_numeric <- as.numeric(tbl)
-  names(tbl_numeric) <- names(tbl)
-  if (scale == "auto") {
-    output <- tbl_numeric / length(x)
-  } else if (scale == "raw") {
-    output <- tbl_numeric
-  } else if (is.numeric(scale)) {
-    output <- tbl_numeric / scale
-  } else {
-    stop(".clone_size(): Invalid scale argument. Indicate 'auto', 'raw' or a numeric value.")
-  }
-  return(as.data.frame(enframe(output, name = "clone_id", value = "value")))
-}
-
-.intra_subset <- function(
-    x,                     # a subsample of clone ids
-    expanded_min_size = 2, # clone size
-    scale = "auto",
-    ...                    # to ignore .inter_subset() arguments passed to sure()
-) { 
-  tbl <- table(x)
-  n_in_expanded <- sum(tbl[tbl >= expanded_min_size])
-  if (scale == "auto") {
-    output <- n_in_expanded / length(x)
-  } else if (scale == "raw") {
-    output <- n_in_expanded
-  } else if (is.numeric(scale)) {
-    output <- n_in_expanded / scale
-  } else {
-    stop(".intra_subset(): Invalid scale argument. Indicate 'auto', 'raw' or a numeric value.")
-  }
-  return(output)
-}
-
-.inter_subset <- function(
-    x,                    # df with clone_key and subset_key columns
-    subset_values,        # subset values of cells in x in same order
-    subset_levels = NULL, # all possible subset levels
-    method_inter = c("sum_n", "average_proportions"),
-    expanded_min_size = 3 # min size of clone to be considered expanded
-) {
-  
-  # Prepare functions
-  .sum_n <- function(tbl) {
-    # Original implementation does scaling using all subsamples i.e.:
-    # colSums(subsamples) / sum(subsamples)
-    # But i think below version account for variation across subsamples which hopefully should be minimal
-    return(colSums(tbl) / sum(tbl))
-  }
-  .average_proportions <- function(tbl) {
-    prop_tbl <- apply(tbl, MARGIN = 1, proportions)
-    return(apply(prop_tbl, MARGIN = 2, mean))
-  }
-  
-  method_inter <- method_inter[1]
-  
-  assert_that(
-    length(x) == length(subset_values),
-    msg = ".inter_subset(): Length of x and subset_values not equal"
-  )
-  
-  .calculate_output <- switch(method_inter,
-                              "sum_n" = .sum_n,
-                              "average_proportions" = .average_proportions,
-                              stop(".inter_subset(): Invalid method provided"))
-  
-  # Converted to factor so all levels are used
-  x_fct <- factor(x)
-  subset_values_fct <- factor(subset_values, levels = subset_levels)
-  tbl <- table(x_fct, subset_values_fct)
-  expanded_clones <- which(rowSums(tbl) >= expanded_min_size)
-  
-  if (length(expanded_clones) >= 1) {
-    output <- .calculate_output(tbl[expanded_clones, , drop = FALSE])
-  } else {
-    output <- as.data.frame(
-      matrix(data = 0, nrow = 1, ncol = ncol(tbl),
-             dimnames = list("", colnames(tbl)))
-    )
-  }
-  
-  return(output)
-  
   
 }
 
