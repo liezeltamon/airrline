@@ -94,3 +94,17 @@ kmer_usage <- function(
   rownames(kmer_mx) <- output_row_ids
   kmer_mx
 }
+# #Example usage:
+# df <- data.frame(
+#   sequence = c("ATCGATCG", "GCTAGCTA", "ATCGATCG", "GCTAGCTA"),
+#   group = c("A", "A", "B", "B")
+# )
+# result <- kmer_usage(
+#   df,
+#   sequence_key = "sequence",
+#   grouping_key = "group",
+#   motif_length = 2,
+#   sequence_type = "nt",
+#   output_type = "fraction"
+# )
+# print(result) # Returns a matrix of k-mer fractions per group
