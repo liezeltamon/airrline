@@ -10,7 +10,7 @@ from functools import reduce, partial
 
 # %% Parameters
 
-contig_dir = "code/airr/reannotate/contigs_separate_directories"
+contig_dir = "results/airr/reannotate/contigs_separate_directories"
 ignore_files = ["meta.csv", "reannotate_logs", "SLE_batch_2_pool_1", "SLE_batch_2_pool_2"]
 library_type_id = "ig_rearranged"
 ddl_prefix = "all"
