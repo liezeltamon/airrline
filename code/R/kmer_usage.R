@@ -2,6 +2,33 @@ library(immApex)
 library(assertthat)
 library(Biostrings)
 
+is_valid_sequence <- function(sequences, type = c("nt", "aa"), productive_only = FALSE) {
+  type <- match.arg(type)
+  
+  sapply(sequences, function(seq) {
+    if (is.na(seq) || seq == "" || !is.character(seq)) {
+      return(FALSE)
+    }
+    
+    # Check for stop codons if productive_only is TRUE
+    if (type == "aa" && productive_only && grepl("\\*", seq)) {
+      return(FALSE)
+    }
+    
+    # Validate with Biostrings
+    tryCatch({
+      if (type == "nt") {
+        Biostrings::DNAString(seq)
+      } else if (type == "aa") {
+        Biostrings::AAString(seq)
+      }
+      return(TRUE)
+    }, error = function(e) {
+      return(FALSE)
+    })
+  })
+}
+
 get_all_kmers <- function(k, type = c("nt", "aa")) {
   type <- match.arg(type)
   
@@ -25,9 +52,16 @@ kmer_usage <- function(
     ...
 ) {
   
+  warning("This function cannot deal with invalid sequences so deal with them beforehand.")
+
   # Validate inputs
   assertthat::assert_that(is.data.frame(df))
   assertthat::assert_that(sequence_key %in% names(df))
+  # Assert that sequences are productive i.e. not containing "*"
+  assertthat::assert_that(
+    all(!grepl("\\*", df[[sequence_key]])),
+    msg = "Sequences contain stop codons ('*'). Please filter them out before proceeding."
+  )
   if (!is.null(grouping_key)) {
     assertthat::assert_that(grouping_key %in% names(df))
   }
@@ -75,6 +109,7 @@ kmer_usage <- function(
   for (i in seq_along(kmer_counts_list)) {
     counts_df <- kmer_counts_list[[i]]
     kmer_mx[i, counts_df$motif] <- counts_df$frequency
+    message("Processed ", i, " / ", length(kmer_counts_list), " entries.")
   }
 
   # Convert to requested output format
