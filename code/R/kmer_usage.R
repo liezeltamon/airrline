@@ -87,7 +87,7 @@ kmer_usage <- function(
     input,
     USE.NAMES = TRUE,
     simplify = FALSE,
-    FUN = immApex::calculateMotif,
+    FUN = immApex:::calculateMotif,
     motif.lengths = motif_length,
     min.depth = min.depth,
     ...
