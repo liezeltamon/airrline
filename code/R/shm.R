@@ -1,103 +1,182 @@
-# From output of ddl.quantify_mutations(), calculate various mutation ratios:
-# - CDR vs FWR mutation ratios
-# - R vs S mutation ratios
-# - By isotype (IGH, IGK, IGL)
+# From output of ddl.quantify_mutations(), calculate additional mutation features
 
-calculate_mutation_ratios <- function(df) {
-  
-  # Helper function to safely calculate ratio
-  safe_ratio <- function(numerator, denominator) {
-    ratio <- numerator / denominator
-    ratio[is.infinite(ratio) | is.nan(ratio)] <- NA
-    return(ratio)
-  }
-  
-  # Extract mutation type (count or freq) and region patterns
-  mu_cols <- grep("^mu_(count|freq)_", names(df), value = TRUE)
-  
-  # Determine if we're working with counts or frequencies
-  has_count <- any(grepl("^mu_count_", names(df)))
-  has_freq <- any(grepl("^mu_freq_", names(df)))
-  
-  result_df <- df
-  
-  # Function to calculate ratios for a given metric type
-  calc_ratios_for_type <- function(metric_type) {
-    
-    # Overall CDR vs FWR ratios
-    # Total CDR (CDR1 + CDR2)
-    cdr_total <- rowSums(df[, grep(paste0("^mu_", metric_type, "_cdr[12]_[rs]$"), 
-                                    names(df), value = TRUE)], na.rm = TRUE)
-    
-    # Total FWR (FWR1 + FWR2 + FWR3)
-    fwr_total <- rowSums(df[, grep(paste0("^mu_", metric_type, "_fwr[123]_[rs]$"), 
-                                    names(df), value = TRUE)], na.rm = TRUE)
-    
-    result_df[[paste0("ratio_", metric_type, "_cdr_fwr")]] <<- safe_ratio(cdr_total, fwr_total)
-    
-    # R vs S mutation ratios
-    # CDR R vs S
-    cdr_r <- rowSums(df[, grep(paste0("^mu_", metric_type, "_cdr[12]_r$"), 
-                                names(df), value = TRUE)], na.rm = TRUE)
-    cdr_s <- rowSums(df[, grep(paste0("^mu_", metric_type, "_cdr[12]_s$"), 
-                                names(df), value = TRUE)], na.rm = TRUE)
-    result_df[[paste0("ratio_", metric_type, "_cdr_r_s")]] <<- safe_ratio(cdr_r, cdr_s)
-    
-    # FWR R vs S
-    fwr_r <- rowSums(df[, grep(paste0("^mu_", metric_type, "_fwr[123]_r$"), 
-                                names(df), value = TRUE)], na.rm = TRUE)
-    fwr_s <- rowSums(df[, grep(paste0("^mu_", metric_type, "_fwr[123]_s$"), 
-                                names(df), value = TRUE)], na.rm = TRUE)
-    result_df[[paste0("ratio_", metric_type, "_fwr_r_s")]] <<- safe_ratio(fwr_r, fwr_s)
-    
-    # By isotype (IGH, IGK, IGL)
-    for (isotype in c("IGH", "IGK", "IGL")) {
-      # CDR vs FWR by isotype
-      cdr_iso <- rowSums(df[, grep(paste0("^mu_", metric_type, "_cdr[12]_[rs]_", isotype, "$"), 
-                                     names(df), value = TRUE)], na.rm = TRUE)
-      fwr_iso <- rowSums(df[, grep(paste0("^mu_", metric_type, "_fwr[123]_[rs]_", isotype, "$"), 
-                                     names(df), value = TRUE)], na.rm = TRUE)
-      result_df[[paste0("ratio_", metric_type, "_cdr_fwr_", isotype)]] <<- safe_ratio(cdr_iso, fwr_iso)
-      
-      # R vs S in CDR by isotype
-      cdr_r_iso <- rowSums(df[, grep(paste0("^mu_", metric_type, "_cdr[12]_r_", isotype, "$"), 
-                                       names(df), value = TRUE)], na.rm = TRUE)
-      cdr_s_iso <- rowSums(df[, grep(paste0("^mu_", metric_type, "_cdr[12]_s_", isotype, "$"), 
-                                       names(df), value = TRUE)], na.rm = TRUE)
-      result_df[[paste0("ratio_", metric_type, "_cdr_r_s_", isotype)]] <<- safe_ratio(cdr_r_iso, cdr_s_iso)
-      
-      # R vs S in FWR by isotype
-      fwr_r_iso <- rowSums(df[, grep(paste0("^mu_", metric_type, "_fwr[123]_r_", isotype, "$"), 
-                                       names(df), value = TRUE)], na.rm = TRUE)
-      fwr_s_iso <- rowSums(df[, grep(paste0("^mu_", metric_type, "_fwr[123]_s_", isotype, "$"), 
-                                       names(df), value = TRUE)], na.rm = TRUE)
-      result_df[[paste0("ratio_", metric_type, "_fwr_r_s_", isotype)]] <<- safe_ratio(fwr_r_iso, fwr_s_iso)
-    }
-    
-    # Individual region ratios
-    # CDR1 vs FWR1, CDR2 vs FWR2, etc.
-    for (region_num in 1:2) {
-      cdr_region <- rowSums(df[, grep(paste0("^mu_", metric_type, "_cdr", region_num, "_[rs]$"), 
-                                        names(df), value = TRUE)], na.rm = TRUE)
-      fwr_region <- rowSums(df[, grep(paste0("^mu_", metric_type, "_fwr", region_num, "_[rs]$"), 
-                                        names(df), value = TRUE)], na.rm = TRUE)
-      result_df[[paste0("ratio_", metric_type, "_cdr", region_num, "_fwr", region_num)]] <<- 
-        safe_ratio(cdr_region, fwr_region)
-    }
-  }
-  
-  # Calculate for counts if available
-  if (has_count) {
-    calc_ratios_for_type("count")
-  }
-  
-  # Calculate for frequencies if available
-  if (has_freq) {
-    calc_ratios_for_type("freq")
-  }
-  
-  return(result_df)
+.compute_ratio <- function(numerator, denominator, pseudocount = 1) {
+  ratio <- log2((numerator + pseudocount) / (denominator + pseudocount))
+  n_nonfinite <- sum(!is.finite(ratio))
+  stopifnot("Non-finite values in ratio computation" = n_nonfinite == 0)
+  ratio
 }
 
-# Usage:
-# df_with_ratios <- calculate_mutation_ratios(df)
+.make_name_ratio <- function(num, den, prefix) paste(
+  prefix, num, "over", den, sep = "_"
+)
+
+.compute_ratio_combinations <- function(
+  numerator_mx, denominator_mx, prefix = "muratio", pairwise = TRUE
+) {
+  stopifnot(is.matrix(numerator_mx), is.matrix(denominator_mx))
+  num_names <- colnames(numerator_mx)
+  den_names <- colnames(denominator_mx)
+  nrow_out <- nrow(numerator_mx)
+
+  if (pairwise) {
+    combos <- expand.grid(num = num_names, den = den_names, stringsAsFactors = FALSE)
+  } else {
+    stopifnot(length(num_names) == length(den_names))
+    combos <- data.frame(num = num_names, den = den_names, stringsAsFactors = FALSE)
+  }
+
+  ncol_out <- nrow(combos)
+  output <- matrix(NA_real_, nrow = nrow_out, ncol = ncol_out)
+  out_names <- character(ncol_out)
+
+  for (i in seq_len(ncol_out)) {
+    num <- combos$num[i]
+    den <- combos$den[i]
+    output[, i] <- .compute_ratio(numerator_mx[, num], denominator_mx[, den])
+    out_names[i] <- .make_name_ratio(num, den, prefix = prefix)
+  }
+  colnames(output) <- out_names
+  output
+}
+
+.parse_colnames <- function(colnames_vec) {
+  # Splits column names by "_" and returns a data.frame with each part as a column
+  # Handles missing parts by filling with NA
+  split_parts <- strsplit(colnames_vec, "_")
+  max_len <- max(lengths(split_parts))
+  # Pad each split to max_len with NA
+  padded <- lapply(split_parts, function(x) { length(x) <- max_len; x })
+  parts_df <- as.data.frame(do.call(rbind, padded), stringsAsFactors = FALSE)
+  colnames(parts_df) <- paste0("part", seq_len(max_len))
+  rownames(parts_df) <- colnames_vec
+  # Change colnames
+  colnames(parts_df) <- c("prefix", "value_type", "region", "mutation_type", "chain")[1:max_len]
+
+  # Split part3 (e.g., fwr1, cdr2) into region and number
+  if ("region" %in% colnames(parts_df)) {
+    parts_df$region_type <- gsub("[0-9]+$", "", parts_df$region)
+    parts_df$region_n <- gsub("^[a-zA-Z]+", "", parts_df$region)
+  }
+  
+  parts_df
+}
+
+compute_shm_features <- function(df) {
+  
+  feature_list <- list()
+  parse_df <- .parse_colnames(names(df))
+
+  # Groupings per value_type, mutation_type, chain
+
+  groupings_df <- na.omit(unique(
+    parse_df[, c("value_type", "mutation_type", "chain")]
+  ))
+
+  for (g in seq_len(nrow(groupings_df))) {
+
+    grouping <- groupings_df[g, ]
+
+    # 1. Calculate pairwise fwr/cdr ratios
+
+    cdr_cols_g <- rownames(
+      subset(
+        parse_df,
+        value_type == grouping$value_type &
+        mutation_type == grouping$mutation_type &
+        chain == grouping$chain &
+        region_type == "cdr"
+      )
+    ) %>% sort()
+
+    fwr_cols_g <- rownames(
+      subset(
+        parse_df,
+        value_type == grouping$value_type &
+        mutation_type == grouping$mutation_type &
+        chain == grouping$chain &
+        region_type == "fwr"
+      )
+    ) %>% sort()
+
+    mx <- .compute_ratio_combinations(
+      df[ , fwr_cols_g, drop = FALSE] %>% as.matrix(),
+      df[ , cdr_cols_g, drop = FALSE] %>% as.matrix(),
+      prefix = "muratio"
+    )
+    rownames(mx) <- rownames(df)
+    feature_list <- c(feature_list, list(mx))
+  
+    # 2. Average fwr regions
+
+    fwr_ave <- apply(
+      df[ , fwr_cols_g, drop = FALSE], 1, mean, na.rm = FALSE
+    )
+
+    # 3. Average fwr and cdr regions
+
+    .compute_average <- function(df, cols) {
+      feature_name <- paste0(
+        "mumean", "_", unique(gsub("[0-9]+", "", cols))
+      )
+      stopifnot(length(feature_name) == 1)
+      setNames(
+        list(apply(df[, cols, drop = FALSE], 1, mean, na.rm = FALSE)),
+        feature_name
+      )
+    }
+    cdr_ave <- .compute_average(df, cdr_cols_g)
+    fwr_ave <- .compute_average(df, fwr_cols_g)
+    feature_list[[names(cdr_ave)]] <- cdr_ave[[1]]
+    feature_list[[names(fwr_ave)]] <- fwr_ave[[1]]
+    
+    # 4. Average fwr regions / average cdr regions
+
+    feature_name <- .make_name_ratio(
+      names(fwr_ave), names(cdr_ave), prefix = "muratio"
+    )
+    feature_list[[feature_name]] <- .compute_ratio(
+      fwr_ave[[1]], cdr_ave[[1]]
+    )
+  }
+
+  # Groupings per value_type, chain, region_type, region_n
+
+  groupings_df <- na.omit(unique(
+    parse_df[, c("value_type", "chain", "region_type", "region_n")]
+  ))
+
+  for (g in seq_len(nrow(groupings_df))) {
+
+    grouping <- groupings_df[g, ]
+
+    # 5. Ratio s / r in each region
+
+    cols_g <- rownames(
+      subset(
+        parse_df,
+        value_type == grouping$value_type &
+        chain == grouping$chain &
+        region_type == grouping$region_type &
+        region_n == grouping$region_n
+      )
+    ) %>% sort()
+    stopifnot(length(cols_g) == 2)
+    feature_name <- .make_name_ratio(
+      cols_g[grepl("_r_", cols_g)],
+      cols_g[grepl("_s_", cols_g)],
+      prefix = "muratio"
+    )
+    feature_list[[feature_name]] <- .compute_ratio(
+      df[, cols_g[grepl("_r_", cols_g)]],
+      df[, cols_g[grepl("_s_", cols_g)]]
+    )
+  }
+
+  do.call(cbind, feature_list)
+
+}
+
+# Example:
+#   df <- data.frame(...)
+#   compute_shm_features(df)
