@@ -47,44 +47,47 @@ assert vdj.metadata.index.is_unique, "Duplicate cell barcodes found in the conca
 
 # %% Quantify mutations
 
-mu_df_list = []
-for bool in [True, False]:
+for region_definition in ["IMGT_V_BY_REGIONS", None]:
+    mu_df_list = []
 
-    ddl.pp.quantify_mutations(
-        vdj,
-        # "Whether to return the results for heavy chain and light chain separately"
-        split_locus=True,
-        frequency = bool,
-        # "Whether to return the results for replacement and silent mutations separately"
-        combine=False,
-        # For region definitions, see https://shazam.readthedocs.io/en/stable/topics/IMGT_SCHEMES/
-        region_definition="IMGT_V_BY_REGIONS"
+    for bool in [True, False]:
+        vdj_tmp = vdj.copy()
+        ddl.pp.quantify_mutations(
+            vdj_tmp,
+            # "Whether to return the results for heavy chain and light chain separately"
+            split_locus=True,
+            frequency = bool,
+            # "Whether to return the results for replacement and silent mutations separately"
+            combine=False,
+            # For region definitions, see https://shazam.readthedocs.io/en/stable/topics/IMGT_SCHEMES/
+            region_definition=region_definition
+        )
+        mu_df_list.append(vdj_tmp.metadata.filter(like="mu_").copy())
+
+    for bool in [True, False]:
+        vdj_tmp = vdj.copy()
+        ddl.pp.quantify_mutations(
+            vdj_tmp,
+            # "Whether to return the results for heavy chain and light chain separately"
+            split_locus=False,
+            frequency = bool,
+            # "Whether to return the results for replacement and silent mutations separately"
+            combine=True,
+            region_definition=region_definition
+        )
+        mu_df_list.append(vdj_tmp.metadata.filter(like="mu_").copy())
+
+    mu_df = reduce(merge_dfs_partial, mu_df_list)
+    # Drop the duplicated columns with the "_y" suffix
+    mu_df = mu_df.loc[:, ~mu_df.columns.str.endswith("_y")]
+    mu_df.sort_index(axis=1, inplace=True)
+
+    # Save
+
+    mu_df.reset_index(names="index_unique", inplace=True)
+    os.makedirs(os.path.join(out_dir, region_definition), exist_ok=True)
+    mu_df.to_csv(
+        os.path.join(out_dir, region_definition, "mutations.csv"), index=False
     )
-    mu_df_list.append(vdj.metadata.filter(like="mu_").copy())
 
-for bool in [True, False]:
-
-    ddl.pp.quantify_mutations(
-        vdj,
-        # "Whether to return the results for heavy chain and light chain separately"
-        split_locus=False,
-        frequency = bool,
-        # "Whether to return the results for replacement and silent mutations separately"
-        combine=True
-    )
-    mu_df_list.append(vdj.metadata.filter(like="mu_").copy())
-
-mu_df = reduce(merge_dfs_partial, mu_df_list)
-# Drop the duplicated columns with the "_y" suffix
-mu_df = mu_df.loc[:, ~mu_df.columns.str.endswith("_y")]
-mu_df.sort_index(axis=1, inplace=True)
-
-# %% Save
-
-mu_df.reset_index(names="index_unique", inplace=True)
-mu_df.to_csv(os.path.join(out_dir, "mutations.csv"), index=False)
-
-# mu_df.to_hdf(
-#     os.path.join(out_dir, "mutations.h5"),
-#     key="x"
-# )
+    del vdj_tmp, mu_df, mu_df_list
