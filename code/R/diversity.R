@@ -7,7 +7,8 @@
 # Gini-Simpson, Pielou, and Basharin were the most robust in both simulated and experimental data
 
 # git clone https://github.com/BorchLab/immApex.git
-source("immApex/R/diversity.R")
+library(immApex)
+#source("immApex/R/diversity.R")
 
 # ----- FUNCTIONS -----
 
