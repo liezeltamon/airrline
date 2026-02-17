@@ -20,10 +20,7 @@
   return(as.data.frame(enframe(output, name = "clone_id", value = "value")))
 }
 
-.grouping_size <- function(
-  x,
-  ...
-) {
+.grouping_size <- function(x, ...) {
   return(length(x))
 }
 
