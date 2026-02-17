@@ -1,6 +1,7 @@
 # Measure clonality of cell subsets e.g. cell types, isotypes
 
 library(tidyverse)
+library(assertthat)
 
 # ----- FUNCTIONS -----
 
@@ -66,13 +67,13 @@ library(tidyverse)
   
   if (length(expanded_clones) >= 1) {
     output <- .calculate_output(tbl[expanded_clones, , drop = FALSE])
+    # To match format below
+    output <- t(output) %>% as.data.frame()
   } else {
     output <- as.data.frame(
       matrix(data = 0, nrow = 1, ncol = ncol(tbl),
              dimnames = list("", colnames(tbl)))
     )
   }
-  
   return(output)
-  
 }
