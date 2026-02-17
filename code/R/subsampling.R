@@ -8,6 +8,8 @@ library(assertthat)
 library(foreach)
 library(doParallel)
 library(tidyverse)
+#source("misc.R")
+#source("subset_clonality.R")
 
 #source("utils/env.R")
 #library(scRepertoire) # For some diversity measures
@@ -46,7 +48,7 @@ measure_clonality <- function(
     clone_key,
     drop_na = FALSE,
     method_fun = NULL, # Ideally written like other pre-defined method functions giving 1 value result
-    method = ifelse(!is.null(method_fun), NULL, method), #"intra_subset", # Could be diversity metrics or any other metric that can be measured per boot/subsample
+    method = "intra_subset", # Could be diversity metrics or any other metric that can be measured per boot/subsample
     # Set NULL if not subsampling; grouping not considered for calculation if size below this
     subsample_size = NULL,
     n_subsamples = 1,
@@ -61,23 +63,26 @@ measure_clonality <- function(
   # See dedicated scripts for functions to assign to .calculate_measure() applying to vector of clone ids (x)
   if (!is.null(method_fun)) {
     .calculate_measure <- method_fun
-    method = NULL
+    method <- NULL
   } else {
     .calculate_measure <- switch(
       method,
-      "clone_size"   = .clone_size,
+      "clone_size"     = .clone_size,
       "grouping_size"  = .grouping_size,
-      "intra_subset" = .intra_subset,
-      "inter_subset" = .inter_subset,
+      "intra_subset"   = .intra_subset,
+      "inter_subset"   = .inter_subset,
       # Add diversity metrics here
       stop("measure_clonality(): Invalid method provided")
     )
   }
 
+  keys_to_select <- c("grouping_id", clone_key, subset_key)
+  keys_to_select <- keys_to_select[!is.null(keys_to_select)]
   data_wrangled <- data %>%
     unite("grouping_id", grouping_keys, remove = FALSE, sep = sep) %>% 
-    select(all_of(c("grouping_id", clone_key, subset_key))) %>% 
-    rename(clone_id = !!sym(clone_key)) %>% 
+    #select(all_of(c("grouping_id", clone_key, subset_key))) %>% 
+    select(all_of(keys_to_select)) %>%
+    rename_with(~ "clone_id", all_of(clone_key)) %>% 
     { if (drop_na) drop_na(.) else . }
   
   # List of df per group
@@ -87,9 +92,14 @@ measure_clonality <- function(
   )
   
   # Get required information across groupings
+
+  # -Get seed values for each group to ensure reproducibility across runs and parallelisation
   set.seed(seed)
-  seed_values <- sample(1:n_subsamples, size = length(grouped_data_lst), replace = FALSE)
+  seed_values <- sample(
+    1:(.Machine$integer.max), size = length(grouped_data_lst), replace = FALSE
+  )
   
+  # -Subsample size for each group, either set by user or based on group size (if subsample_size = NULL)
   if (!is.null(subsample_size)) {
     subsample_sizes <- rep(subsample_size, times = length(grouped_data_lst))
   } else {
@@ -97,17 +107,20 @@ measure_clonality <- function(
   }
   rm(subsample_size)
   
+  # -Subset levels for each group, mainly used for inter-subset clonality
   subset_levels <- "value"
   if (!is.null(subset_key)) {
     subset_levels <- sort(unique(data[[subset_key]]))
   }
   
-  for (i in 1:length(grouped_data_lst)) {
+  # -Add these to grouped_data_lst so they are passed to workers when parallelising, also add group name for easier debugging
+  for (i in seq_along(grouped_data_lst)) {
     grouped_data_lst[[i]] <- list(
       df = grouped_data_lst[[i]],
       seed = seed_values[i],
       name = names(grouped_data_lst)[[i]],
-      subset_levels = subset_levels
+      subset_levels = subset_levels,
+      subsample_size = subsample_sizes[i]
     )
   }
 
@@ -123,35 +136,44 @@ measure_clonality <- function(
     `%op%` <- `%do%`
   }
   
-  # Already exporting so not assigning (.export) this but could behave differently in cluster so just comment out code
-  #to_export <- c("subsample_size", "n_subsamples", "subset_key", "sure")
   SUBSAMPLED <- foreach(
     grp_data = grouped_data_lst,
-    subsample_size = subsample_sizes,
     .inorder = TRUE,
-    .packages = c("tidyverse", "assertthat")
+    .packages = c("tidyverse", "assertthat"),
+    .export = c("n_subsamples", "subset_key", ".calculate_measure")
   ) %op% {
     
-    message(grp_data$name, " subsample_size=", subsample_size, " seed=", grp_data$seed)
+    message(
+      grp_data$name, " subsample_size=", grp_data$subsample_size, " seed=", grp_data$seed
+    )
     
-    if (nrow(grp_data$df) >= subsample_size) {
-      
+    if (nrow(grp_data$df) >= grp_data$subsample_size) {
       subsampled_lst <- vector("list", length = n_subsamples)
       set.seed(grp_data$seed)
       for (b in 1:n_subsamples) {
-        
-        sample_inds <- sample(1:nrow(grp_data$df), size = subsample_size, replace = FALSE)
+        sample_inds <- sample(
+          1:nrow(grp_data$df), size = grp_data$subsample_size, replace = FALSE
+        )
         input <- grp_data$df[sample_inds, "clone_id"]
-        subset_values <- grp_data$df[sample_inds, subset_key]
+        subset_values <- if (!is.null(subset_key)) grp_data$df[sample_inds, subset_key] else NULL
         # subset_values ignored for other functions except .inter_subset()
-        subsampled_lst[[b]] <- .calculate_measure(input, subset_values = subset_values, subset_levels = grp_data$subset_levels)
-        
+        subsampled_lst[[b]] <- .calculate_measure(
+          input,
+          subset_values = subset_values,
+          subset_levels = grp_data$subset_levels
+        ) %>% 
+        # Convert to data.frame if not already, to match output of .inter_subset() and make downstream summarisation easier
+        { if (is.data.frame(.)) . else data.frame(value = .) }
       }
-      
+      message(grp_data$name, " subsampling done!")
     } else {
       subsampled_lst <- list(as.data.frame(
         matrix(NA, nrow = 1, ncol = length(grp_data$subset_levels), dimnames = list(NULL, grp_data$subset_levels))
       ))
+      message(
+        grp_data$name, " has size ", nrow(grp_data$df), " < subsample_size ", grp_data$subsample_size, 
+        " so returning NA."
+      )
     }
     
     message(grp_data$name, " done!")
@@ -166,41 +188,32 @@ measure_clonality <- function(
   
   ##### parallel end
   
-  assert_that(
-    length(grouped_data_lst) == length(SUBSAMPLED),
-    msg = "Length of SUBSAMPLED incorrect"
-  )
+  assert_that(length(grouped_data_lst) == length(SUBSAMPLED))
   names(SUBSAMPLED) <- names(grouped_data_lst)
   
   # Return or summarise subsampled values (one value per grouping)
   
   if (return.boots) {
-    OUTPUT <- transform_to_df(SUBSAMPLED, method = method)
+    OUTPUT <- .transform_to_df(SUBSAMPLED, method = method)
   } else {
-    stop("measure_clonality(): Need to fix this")
-    .summarise_measure <- switch(method,
-                                 "inter_subset" = .summarise_inter_subset,
-                                 .summarise_one_value)
-    
+    .summarise_measure <- .summarise_one_value
+    if (!is.null(method) && method == "inter_subset") {
+        .summarise_measure <- .summarise_inter_subset
+    }
     OUTPUT <- cbind.data.frame(
       grouping_id = names(grouped_data_lst),
       value = .summarise_measure(SUBSAMPLED)
     )
   }
-  
+
   return(OUTPUT)
-  
 }
 
 # Functions to wrangle / summarise to get OUTPUT:
 
 # Convert SUBSAMPLED to melted data.frame ready for plotting
 # grouping_id with NA as value as those repertoire with size < subsample_size
-transform_to_df <- function(x, method = NULL) {
-  if (!is.data.frame(x[[1]][[1]])) {
-    x <- lapply(x, function(lst) data.frame(value = matrix(unlist(lst), ncol = 1)))
-  }
-
+.transform_to_df <- function(x, method = NULL) {
   grp_df_lst <- sapply(x, USE.NAMES = TRUE, simplify = FALSE, function(df_lst) {
     bind_rows(df_lst)
   })
@@ -214,11 +227,26 @@ transform_to_df <- function(x, method = NULL) {
 # For measures that return one value per subsample
 .summarise_one_value <- function(lst) {
   # One final value per grouping
-  return(
-    unlist(
-      lapply(lst, function(x) mean(unlist(x, recursive = TRUE)))
-    )
+  unlist(
+    lapply(lst, function(x) mean(unlist(x, recursive = TRUE)))
   )
 }
 
-# rm(list = ls()); gc()
+.summarise_inter_subset <- function(lst) {
+  # One final value per grouping, subset_id combination
+  bind_rows(
+    y <- lapply(lst, function(x) {
+      x_df <- bind_rows(x)
+      colMeans(x_df)
+    })
+  )
+}
+
+x <- SUBSAMPLED[[1]]
+with_value <- lapply(y, function(x){
+  if ("value" %in% names(x)) {
+    return(TRUE)
+  } else {
+    return(FALSE)
+  } 
+}) %>% unlist()
