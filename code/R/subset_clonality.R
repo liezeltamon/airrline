@@ -26,7 +26,7 @@ library(assertthat)
 }
 
 .inter_subset <- function(
-    x,                    # df with clone_key and subset_key columns
+    x,                    # clone ids
     subset_values,        # subset values of cells in x in same order
     subset_levels = NULL, # all possible subset levels
     method_inter = c("sum_n", "average_proportions"),
