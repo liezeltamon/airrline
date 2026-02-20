@@ -9,11 +9,11 @@ library(scRepertoire)
 # ----- FUNCTIONS -----
 
 .clonal_overlap <- function(
-    x,                    # df with clone_key and subset_key columns
+    x,                    # Clone ids
     subset_values,        # Subset values of cells in x in same order
-    subset_levels = NULL, # All possible subset levels
     method = c("overlap", "morisita", "jaccard", "cosine", "raw"), # As in scRepertoire:::clonalOverlap()
-    normalise = FALSE     # Normalise final values? Depends on the overlap metric and may not be necessary after subsampling
+    normalise = FALSE,     # Normalise final values? Depends on the overlap metric and may not be necessary after subsampling
+    ...
 ) {
   
   # Checks
@@ -27,7 +27,7 @@ library(scRepertoire)
   # Variables, e.g. cloneCall, input.data, length, used as in scRepertoire:::clonalOverlap(), 
   # whose internal functions are being used here
   cloneCall = "clone_id"
-  x_df <- data.frame(df$clone_id)
+  x_df <- data.frame(x)
   colnames(x_df) <- cloneCall
   if(method == "morisita") {
     return_type <- "freq"
@@ -36,9 +36,11 @@ library(scRepertoire)
   }
   
   input.data <- split(x_df, f = subset_values)
+  # To enforce that pair names are formed by sorting alphabetically first, e.g. A_B not B_A, making names of output predictable and can be created outside the function
+  input.data <- input.data[sort(names(input.data), decreasing = FALSE)]
   num_samples <- length(input.data)
   names_samples <- names(input.data)
-  length <- seq_len(num_samples)
+  idx_samples <- seq_len(num_samples)
   
   # Choose overlap metric function
   indexFunc <- switch(
@@ -54,7 +56,7 @@ library(scRepertoire)
   coef_matrix <- data.frame(matrix(NA, num_samples, num_samples))
   coef_matrix <- scRepertoire:::.calculateIndex(
     input.data,
-    length,
+    idx_samples,
     cloneCall,
     coef_matrix, 
     indexFunc, 
@@ -67,7 +69,7 @@ library(scRepertoire)
     rownames_to_column("row_id") %>%
     pivot_longer(-row_id, names_to = "col_id") %>% 
     filter(!is.na(value)) %>% 
-    unite("features", row_id, col_id, sep = ".") %>% 
+    unite("features", row_id, col_id, sep = "..") %>% 
     pivot_wider(names_from = features, values_from = value) %>% 
     # 1-row dataframe to named numeric vector to match .inter_subset output
     as.list() %>% unlist()
