@@ -10,6 +10,7 @@ library(doParallel)
 library(tidyverse)
 #source("misc.R")
 #source("subset_clonality.R")
+#source("clonal_overlap.R")
 
 #source("utils/env.R")
 #library(scRepertoire) # For some diversity measures
@@ -48,7 +49,7 @@ measure_clonality <- function(
     clone_key,
     drop_na = FALSE,
     method_fun = NULL, # Ideally written like other pre-defined method functions giving 1 value result
-    method = "intra_subset", # Could be diversity metrics or any other metric that can be measured per boot/subsample
+    method = c("intra_subset", "clone_size", "grouping_size", "inter_subset", "clonal_overlap"), # Could be diversity metrics or any other metric that can be measured per boot/subsample
     # Set NULL if not subsampling; grouping not considered for calculation if size below this
     subsample_size = NULL,
     n_subsamples = 1,
@@ -65,12 +66,14 @@ measure_clonality <- function(
     .calculate_measure <- method_fun
     method <- NULL
   } else {
+    method <- match.arg(method)
     .calculate_measure <- switch(
       method,
       "clone_size"     = .clone_size,
       "grouping_size"  = .grouping_size,
       "intra_subset"   = .intra_subset,
       "inter_subset"   = .inter_subset,
+      "clonal_overlap" = .clonal_overlap,
       # Add diversity metrics here
       stop("measure_clonality(): Invalid method provided")
     )
@@ -112,7 +115,12 @@ measure_clonality <- function(
   if (!is.null(subset_key)) {
     subset_levels <- sort(unique(data[[subset_key]]))
   }
-  
+  # To initialise output matrix with NAs if skipping that group due to size being smaller than subsample size
+  if (method == "clonal_overlap") {
+    # Subset levels is unique pairs of subset_levels sorting alphabetically first
+    subset_levels <- combn(subset_levels, 2, FUN = function(x) paste(sort(x), collapse = ".."))
+  }
+
   # -Add these to grouped_data_lst so they are passed to workers when parallelising, also add group name for easier debugging
   for (i in seq_along(grouped_data_lst)) {
     grouped_data_lst[[i]] <- list(
@@ -156,14 +164,14 @@ measure_clonality <- function(
         )
         input <- grp_data$df[sample_inds, "clone_id"]
         subset_values <- if (!is.null(subset_key)) grp_data$df[sample_inds, subset_key] else NULL
-        # subset_values ignored for other functions except .inter_subset()
+        # subset_values ignored for other functions except .inter_subset(), .clonal_overlap()
         subsampled_lst[[b]] <- .calculate_measure(
           input,
           subset_values = subset_values,
-          subset_levels = grp_data$subset_levels
+          subset_levels = grp_data$subset_levels # ignored by .clonal_overlap()
         ) %>% 
-        # Convert to data.frame if not already, to match output of .inter_subset() and make downstream summarisation easier
-        { if (is.data.frame(.)) . else data.frame(value = .) }
+        # Convert to 1-row data.frame if not already, to match output of .inter_subset() and make downstream summarisation easier
+        { if (is.data.frame(.)) . else as.data.frame(as.list(.)) }
       }
       message(grp_data$name, " subsampling done!")
     } else {
@@ -197,14 +205,15 @@ measure_clonality <- function(
     OUTPUT <- .transform_to_df(SUBSAMPLED, method = method)
   } else {
     .summarise_measure <- .summarise_one_value
-    if (!is.null(method) && method == "inter_subset") {
-        .summarise_measure <- .summarise_inter_subset
+    if (!is.null(method) && (method %in% c("inter_subset", "clonal_overlap"))) {
+      .summarise_measure <- .summarise_inter_subset
     }
     OUTPUT <- cbind.data.frame(
       grouping_id = names(grouped_data_lst),
       value = .summarise_measure(SUBSAMPLED)
     )
   }
+  stopifnot(ncol(OUTPUT) == length(subset_levels) + 1)
 
   return(OUTPUT)
 }
@@ -241,12 +250,3 @@ measure_clonality <- function(
     })
   )
 }
-
-x <- SUBSAMPLED[[1]]
-with_value <- lapply(y, function(x){
-  if ("value" %in% names(x)) {
-    return(TRUE)
-  } else {
-    return(FALSE)
-  } 
-}) %>% unlist()
