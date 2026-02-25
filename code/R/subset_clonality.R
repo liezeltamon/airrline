@@ -26,9 +26,9 @@ library(assertthat)
 }
 
 .inter_subset <- function(
-    x,                    # clone ids
-    subset_values,        # subset values of cells in x in same order
-    subset_levels = NULL, # all possible subset levels
+    x,              # clone ids
+    subset_values,  # subset values of cells in x in same order
+    subset_levels,  # all possible subset levels
     method_inter = c("sum_n", "average_proportions"),
     expanded_min_size = 3 # min size of clone to be considered expanded
 ) {
