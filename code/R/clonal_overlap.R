@@ -41,7 +41,11 @@ library(scRepertoire)
   )
   assert_that(
     all(subset_values %in% subset_levels),
-    msg = ".clonal_overlap(): Not all subset_values are in subset_levels (supposed to be the subset universe)"
+    msg = paste0(
+      ".clonal_overlap(): Not all subset_values are in subset_levels (supposed to be the subset universe). ",
+      "Check subset_values not in subset_levels: ",
+      paste(setdiff(unique(subset_values), subset_levels), collapse = ", ")
+    )
   )
   assert_that(
     length(unique(subset_values)) >= 2,
