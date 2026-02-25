@@ -115,10 +115,13 @@ measure_clonality <- function(
   if (!is.null(subset_key)) {
     subset_levels <- sort(unique(data[[subset_key]]))
   }
-  # To initialise output matrix with NAs if skipping that group due to size being smaller than subsample size
-  if (method == "clonal_overlap") {
+
+  # -Subset levels expected in output, used for checking output is correct and for naming columns in output, mainly used for inter-subset and clonal overlap clonality
+  if (!is.null(method) && (method == "clonal_overlap")) {
     # Subset levels is unique pairs of subset_levels sorting alphabetically first
-    subset_levels <- combn(subset_levels, 2, FUN = function(x) paste(sort(x), collapse = ".."))
+    subset_levels_output <- combn(subset_levels, 2, FUN = function(x) paste(sort(x), collapse = ".."))
+  } else {
+    subset_levels_output <- subset_levels
   }
 
   # -Add these to grouped_data_lst so they are passed to workers when parallelising, also add group name for easier debugging
@@ -128,6 +131,7 @@ measure_clonality <- function(
       seed = seed_values[i],
       name = names(grouped_data_lst)[[i]],
       subset_levels = subset_levels,
+      subset_levels_output = subset_levels_output,
       subsample_size = subsample_sizes[i]
     )
   }
@@ -147,7 +151,7 @@ measure_clonality <- function(
   SUBSAMPLED <- foreach(
     grp_data = grouped_data_lst,
     .inorder = TRUE,
-    .packages = c("tidyverse", "assertthat"),
+    .packages = c("tidyverse", "assertthat", "immApex"),
     .export = c("n_subsamples", "subset_key", ".calculate_measure")
   ) %op% {
     
@@ -162,13 +166,15 @@ measure_clonality <- function(
         sample_inds <- sample(
           1:nrow(grp_data$df), size = grp_data$subsample_size, replace = FALSE
         )
-        input <- grp_data$df[sample_inds, "clone_id"]
-        subset_values <- if (!is.null(subset_key)) grp_data$df[sample_inds, subset_key] else NULL
+        #input <- grp_data$df[sample_inds, "clone_id"] # Gives 1-column dataframe which causes issues for some functions e.g. clonal_overlap()
+        input <- grp_data$df$clone_id[sample_inds]
+        #subset_values <- if (!is.null(subset_key)) grp_data$df[sample_inds, subset_key] else NULL # Gives 1-column dataframe which causes issues for some functions e.g. clonal_overlap()
+        subset_values <- if (!is.null(subset_key)) grp_data$df[[subset_key]][sample_inds] else NULL
         # subset_values ignored for other functions except .inter_subset(), .clonal_overlap()
         subsampled_lst[[b]] <- .calculate_measure(
           input,
           subset_values = subset_values,
-          subset_levels = grp_data$subset_levels # ignored by .clonal_overlap()
+          subset_levels = grp_data$subset_levels
         ) %>% 
         # Convert to 1-row data.frame if not already, to match output of .inter_subset() and make downstream summarisation easier
         { if (is.data.frame(.)) . else as.data.frame(as.list(.)) }
@@ -176,7 +182,11 @@ measure_clonality <- function(
       message(grp_data$name, " subsampling done!")
     } else {
       subsampled_lst <- list(as.data.frame(
-        matrix(NA, nrow = 1, ncol = length(grp_data$subset_levels), dimnames = list(NULL, grp_data$subset_levels))
+        matrix(
+          NA, nrow = 1,
+          ncol = length(grp_data$subset_levels_output),
+          dimnames = list(NULL, grp_data$subset_levels_output)
+        )
       ))
       message(
         grp_data$name, " has size ", nrow(grp_data$df), " < subsample_size ", grp_data$subsample_size, 
@@ -196,6 +206,8 @@ measure_clonality <- function(
   
   ##### parallel end
   
+  message("All subsampling done! Now summarising values...")
+
   assert_that(length(grouped_data_lst) == length(SUBSAMPLED))
   names(SUBSAMPLED) <- names(grouped_data_lst)
   
@@ -213,7 +225,7 @@ measure_clonality <- function(
       value = .summarise_measure(SUBSAMPLED)
     )
   }
-  stopifnot(ncol(OUTPUT) == length(subset_levels) + 1)
+  stopifnot(ncol(OUTPUT) == length(subset_levels_output) + 1)
 
   return(OUTPUT)
 }
