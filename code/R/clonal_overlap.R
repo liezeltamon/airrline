@@ -28,7 +28,15 @@ library(scRepertoire)
     x,              # Clone ids
     subset_values,  # Subset values of cells in x in same order
     subset_levels,  # all possible subset levels
+    subset_levels_keep = NULL, # If not NULL, only keep overlap values for the specified subset pairs, set rest to NA.
+    # e.g. 
+    # list(
+    #   c("t1__naive", "t2__treg"),
+    #   c("t1__naive", "t2__memory"),
+    #   c("t1__memory", "t2__treg")
+    # )
     method = c("overlap", "morisita", "jaccard", "cosine", "raw"), # As in scRepertoire:::clonalOverlap()
+    fill_value = 0, # Value used for missing subset pairs; meaning depends on the overlap metric
     normalise = FALSE,     # Normalise final values? Depends on the overlap metric and may not be necessary after subsampling
     ...
 ) {
@@ -86,7 +94,7 @@ library(scRepertoire)
   subset_levels <- union(names(input.data), subset_levels)
   num_subset_levels <- length(subset_levels)
   coef_matrix <- matrix(
-    0, # 0 vs. NA so all subset levels considered as pairs with 0 overlap instead of being ignored, then all pairs not needed to be returned set to NA later (non-lower tri)
+    fill_value, # Use a non-NA fill so all possible subset pairs based on subset_levels remain represented in the output.
     num_subset_levels, num_subset_levels,
     dimnames = list(
       # Cause scRepertoire:::.calculateIndex will only fill levels = names(input.data) in that order 
@@ -104,7 +112,6 @@ library(scRepertoire)
   )
   coef_matrix[lower.tri(coef_matrix, diag = TRUE)] <- NA_real_
 
-  # To enforce that pair names are formed by sorting alphabetically first, e.g. A_B not B_A, making names of output predictable and can be created outside the function
   coef_matrix <- coef_matrix[
     sort(rownames(coef_matrix), decreasing = FALSE),
     sort(colnames(coef_matrix), decreasing = FALSE)
@@ -115,16 +122,55 @@ library(scRepertoire)
     rownames_to_column("row_id") %>%
     pivot_longer(-row_id, names_to = "col_id") %>% 
     filter(!is.na(value)) %>% 
-    unite("features", row_id, col_id, sep = "..") %>% 
+    
+    # Standardise subset-pair names by sorting levels alphabetically first.
+    rowwise() %>%
+    mutate(
+      features = paste(sort(c(row_id, col_id)), collapse = ".."),
+      row_id = NULL, col_id = NULL
+    ) %>%
+    ungroup() %>%
+    #unite("features", row_id, col_id, sep = "..") %>% 
+
     pivot_wider(names_from = features, values_from = value) %>% 
     # 1-row dataframe to named numeric vector to match .inter_subset output
-    as.list() %>% unlist()
+    as.list() %>%
+    unlist()
   
+  # Keep only the requested subset pairs and set all other overlap features to NA.
+  if (!is.null(subset_levels_keep)) {
+    subset_levels_keep_colnames <- lapply(
+      subset_levels_keep, function(pair) paste(sort(pair), collapse = "..")
+    ) %>% unlist()
+    if (!all(subset_levels_keep_colnames %in% names(output))) {
+      stop(
+        ".clonal_overlap(): Not all subset pairs in subset_levels_keep are in output."
+      )
+    }
+    output[!(names(output) %in% subset_levels_keep_colnames)] <- NA_real_
+    message(
+      ".clonal_overlap(): Returning overlap only for subset pairs in subset_levels_keep; other pairs set to NA."
+    )
+  }
+
   if (normalise) {
-    rng <- max(output) - min(output)
-    if (rng > 0) output <- (output - min(output)) / rng
-    else stop(".clonal_overlap(): All overlap values identical; returning unnormalised values.")
+    output_non_na <- output[!is.na(output)]
+    stopifnot(length(output_non_na) > 0)
+    rng <- max(output_non_na) - min(output_non_na)
+    if (rng > 0) {
+      output[!is.na(output)] <- (output_non_na - min(output_non_na)) / rng
+    } else {
+      stop(".clonal_overlap(): All non-NA overlap values identical; returning unnormalised values.")
+    }
   }
   
+  n_expected_pairs <- choose(length(subset_levels), 2)
+  if (length(output) != n_expected_pairs) {
+    stop(
+      ".clonal_overlap(): output length ", length(output),
+      " != expected pair count ", n_expected_pairs
+    )
+  }
+
   return(output)
 }
