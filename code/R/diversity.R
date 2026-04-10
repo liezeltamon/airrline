@@ -14,10 +14,11 @@ library(immApex)
 
 # x is a character vector of clone identifiers
 
+# Rangers of metrics in https://www.borch.dev/uploads/screpertoire/articles/clonal_diversity
 # 1. Pielou, Basharin, d50, and Gini primarily describe evenness and highly correlate with one another
 #.basharin <- related to shannon so read up on it
 .pielou_evenness  <- function(x, ...) { pielou_evenness(as.numeric(table(x))) }
-.d50_dom          <- function(x, ...) { d50_dom(as.numeric(table(x))) }
+.d50_dom          <- function(x, ...) { d50_dom(as.numeric(table(x))) } # 1 -> Inf
 .gini_coef        <- function(x, ...) { gini_coef(as.numeric(table(x))) }
 
 # 2. Richness is best captured by S index, next Chao1 and ACE which also consider information on evenness
