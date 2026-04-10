@@ -52,7 +52,7 @@ kmer_usage <- function(
     ...
 ) {
   
-  warning("This function cannot deal with invalid sequences so deal with them beforehand.")
+  #warning("This function cannot deal with invalid sequences so deal with them beforehand.")
 
   # Validate inputs
   assertthat::assert_that(is.data.frame(df))
