@@ -1,19 +1,19 @@
 # Receptor sequence overlap between cell/sample subsets (e.g. cell types, isotypes, tissues)
 
 
-set.seed(42)
+# set.seed(42)
 
-# Simulate clone ids - some shared between subsets to make overlap meaningful
-n_cells <- 200
-clone_pool <- paste0("clone_", 1:30)  # 30 unique clones
+# # Simulate clone ids - some shared between subsets to make overlap meaningful
+# n_cells <- 200
+# clone_pool <- paste0("clone_", 1:30)  # 30 unique clones
 
-x <- sample(clone_pool, n_cells, replace = TRUE, prob = c(
-  rep(0.1, 5),   # 5 dominant clones
-  rep(0.02, 25)  # 25 rare clones
-))
+# x <- sample(clone_pool, n_cells, replace = TRUE, prob = c(
+#   rep(0.1, 5),   # 5 dominant clones
+#   rep(0.02, 25)  # 25 rare clones
+# ))
 
-# Subset values - 3 cell types with uneven sizes
-subset_values <- sample(c("t.cd4", "t.cd8", "t.reg"), n_cells, replace = TRUE, prob = c(0.5, 0.35, 0.15))
+# # Subset values - 3 cell types with uneven sizes
+# subset_values <- sample(c("t.cd4", "t.cd8", "t.reg"), n_cells, replace = TRUE, prob = c(0.5, 0.35, 0.15))
 
 
 # Setup
@@ -35,9 +35,9 @@ library(scRepertoire)
     #   c("t1__naive", "t2__memory"),
     #   c("t1__memory", "t2__treg")
     # )
-    method = c("overlap", "morisita", "jaccard", "cosine", "raw"), # As in scRepertoire:::clonalOverlap()
+    method = c("raw", "overlap", "morisita", "jaccard", "cosine"), # As in scRepertoire:::clonalOverlap(). - see https://github.com/BorchLab/scRepertoire/blob/HEAD/R/clonalOverlap.R
     fill_value = 0, # Value used for missing subset pairs; meaning depends on the overlap metric
-    normalise = FALSE,     # Normalise final values? Depends on the overlap metric and may not be necessary after subsampling
+    normalise = FALSE, # Will only apply for now if method == "raw"
     ...
 ) {
   
@@ -139,14 +139,27 @@ library(scRepertoire)
   
   # Keep only the requested subset pairs and set all other overlap features to NA.
   if (!is.null(subset_levels_keep)) {
-    subset_levels_keep_colnames <- lapply(
-      subset_levels_keep, function(pair) paste(sort(pair), collapse = "..")
-    ) %>% unlist()
-    if (!all(subset_levels_keep_colnames %in% names(output))) {
+    subset_levels_keep_colnames <- vapply(
+      subset_levels_keep,
+      function(pair) {
+        paste(sort(pair), collapse = "..")
+      },
+      character(1)
+    )
+
+    missing_pairs <- subset_levels_keep_colnames[
+      !subset_levels_keep_colnames %in% names(output)
+    ]
+    if (length(missing_pairs) > 0) {
       stop(
-        ".clonal_overlap(): Not all subset pairs in subset_levels_keep are in output."
+        paste0(
+          ".clonal_overlap(): The following subset pairs in ",
+          "subset_levels_keep are missing from output: ",
+          paste(missing_pairs, collapse = ", ")
+        )
       )
     }
+
     output[!(names(output) %in% subset_levels_keep_colnames)] <- NA_real_
     message(
       ".clonal_overlap(): Returning overlap only for subset pairs in subset_levels_keep; other pairs set to NA."
@@ -154,13 +167,15 @@ library(scRepertoire)
   }
 
   if (normalise) {
-    output_non_na <- output[!is.na(output)]
-    stopifnot(length(output_non_na) > 0)
-    rng <- max(output_non_na) - min(output_non_na)
-    if (rng > 0) {
-      output[!is.na(output)] <- (output_non_na - min(output_non_na)) / rng
+    if (method == "raw") {
+      output_non_na <- output[!is.na(output)]
+      stopifnot(length(output_non_na) > 0)
+      # Normalise to sum to 1
+      if (sum(output_non_na) > 0) {
+        output[!is.na(output)] <- output_non_na / sum(output_non_na)
+      }
     } else {
-      stop(".clonal_overlap(): All non-NA overlap values identical; returning unnormalised values.")
+      warning("Normalisation can only be applied to raw method for now")
     }
   }
   
