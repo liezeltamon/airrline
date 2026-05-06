@@ -52,6 +52,7 @@ measure_clonality <- function(
     method = c("intra_subset", "clone_size", "grouping_size", "inter_subset", "clonal_overlap"), # Could be diversity metrics or any other metric that can be measured per boot/subsample
     # Set NULL if not subsampling; grouping not considered for calculation if size below this
     subsample_size = NULL,
+    stratify_key = NULL,
     n_subsamples = 1,
     seed = 42,
     n_cpu = 1, # Parallelisation is per grouping
@@ -79,8 +80,8 @@ measure_clonality <- function(
     )
   }
 
-  keys_to_select <- c("grouping_id", clone_key, subset_key)
-  keys_to_select <- keys_to_select[!is.null(keys_to_select)]
+  keys_to_select <- c("grouping_id", clone_key, subset_key, stratify_key)
+
   data_wrangled <- data %>%
     unite("grouping_id", grouping_keys, remove = FALSE, sep = sep) %>% 
     #select(all_of(c("grouping_id", clone_key, subset_key))) %>% 
@@ -124,6 +125,8 @@ measure_clonality <- function(
     subset_levels_output <- subset_levels
   }
 
+  extra_args <- list(...)
+  
   # -Add these to grouped_data_lst so they are passed to workers when parallelising, also add group name for easier debugging
   for (i in seq_along(grouped_data_lst)) {
     grouped_data_lst[[i]] <- list(
@@ -132,7 +135,9 @@ measure_clonality <- function(
       name = names(grouped_data_lst)[[i]],
       subset_levels = subset_levels,
       subset_levels_output = subset_levels_output,
-      subsample_size = subsample_sizes[i]
+      subsample_size = subsample_sizes[i],
+      stratify_key = stratify_key,
+      extra_args = extra_args
     )
   }
 
@@ -152,30 +157,48 @@ measure_clonality <- function(
     grp_data = grouped_data_lst,
     .inorder = TRUE,
     .packages = c("tidyverse", "assertthat", "immApex"),
-    .export = c("n_subsamples", "subset_key", ".calculate_measure")
+    .export = c("n_subsamples", "subset_key", ".calculate_measure", "stratify_key")
   ) %op% {
     
     message(
       grp_data$name, " subsample_size=", grp_data$subsample_size, " seed=", grp_data$seed
     )
     
-    if (nrow(grp_data$df) >= grp_data$subsample_size) {
+    size_check <- if (!is.null(grp_data$stratify_key)) {
+        n_strata <- length(unique(grp_data$df[[grp_data$stratify_key]]))
+        min(table(grp_data$df[[grp_data$stratify_key]])) >= floor(grp_data$subsample_size / n_strata)
+    } else {
+        nrow(grp_data$df) >= grp_data$subsample_size
+    }
+    if (size_check) {
       subsampled_lst <- vector("list", length = n_subsamples)
       set.seed(grp_data$seed)
       for (b in 1:n_subsamples) {
-        sample_inds <- sample(
-          1:nrow(grp_data$df), size = grp_data$subsample_size, replace = FALSE
-        )
+        # Sample
+        if (!is.null(grp_data$stratify_key)) {
+            strata <- split(seq_len(nrow(grp_data$df)), grp_data$df[[grp_data$stratify_key]])
+            n_per_stratum <- floor(grp_data$subsample_size / length(strata))
+            sample_inds <- unlist(lapply(strata, function(idx) {
+                sample(idx, size = n_per_stratum, replace = FALSE)
+            }))
+        } else {
+            sample_inds <- sample(
+                1:nrow(grp_data$df), size = grp_data$subsample_size, replace = FALSE
+            )
+        }
         #input <- grp_data$df[sample_inds, "clone_id"] # Gives 1-column dataframe which causes issues for some functions e.g. clonal_overlap()
         input <- grp_data$df$clone_id[sample_inds]
         #subset_values <- if (!is.null(subset_key)) grp_data$df[sample_inds, subset_key] else NULL # Gives 1-column dataframe which causes issues for some functions e.g. clonal_overlap()
         subset_values <- if (!is.null(subset_key)) grp_data$df[[subset_key]][sample_inds] else NULL
         # subset_values ignored for other functions except .inter_subset(), .clonal_overlap()
-        subsampled_lst[[b]] <- .calculate_measure(
-          input,
-          subset_values = subset_values,
-          subset_levels = grp_data$subset_levels
-        ) %>% 
+        subsampled_lst[[b]] <- do.call(.calculate_measure, c(
+            list(
+                x = input,
+                subset_values = subset_values,
+                subset_levels = grp_data$subset_levels
+            ),
+            grp_data$extra_args
+        )) %>% 
         # Convert to 1-row data.frame if not already, to match output of .inter_subset() and make downstream summarisation easier
         { if (is.data.frame(.)) . else as.data.frame(as.list(.)) }
       }
